@@ -144,13 +144,26 @@ def run_session(settings: Settings) -> None:
     elif settings.gemini_base_url:
         endpoint_info = f" [dim]({settings.gemini_base_url})[/dim]"
 
+    from dashboard.commands import CommandContext, build_default_command_router
+
+    cmd_router = build_default_command_router()
+    cmd_ctx = CommandContext(
+        console=console,
+        state=state,
+        settings=settings,
+        provider=provider,
+        registry=registry,
+        permissions=perms,
+        bus=bus,
+    )
+
     console.print()
     console.print(
         f" [bold cyan]SetuCode[/bold cyan] [dim]│[/dim] "
         f"[white]{settings.provider}[/white]:[dim]{settings.model}[/dim]{endpoint_info} [dim]│[/dim] "
         f"[dim]{settings.workspace_root}[/dim]"
     )
-    console.print(" [dim]Type your message. Commands: /plan, /skills, /clear, /exit[/dim]\n")
+    console.print(" [dim]Type your message. Commands: /model, /skills, /status, /plan, /help, /exit[/dim]\n")
 
     try:
         while True:
@@ -164,38 +177,11 @@ def run_session(settings: Settings) -> None:
             if not user_input:
                 continue
 
-            # Command handling
-            cmd = user_input.lower()
-            if cmd in ("/quit", "/exit", "exit", "quit", "q"):
-                console.print("[dim]Goodbye.[/dim]\n")
-                break
-
-            if cmd == "/clear":
-                os.system("cls" if os.name == "nt" else "clear")
-                continue
-
-            if cmd == "/plan":
-                plan = getattr(state, "plan", None)
-                if plan and plan.tasks:
-                    console.print(Markdown(plan.render()))
-                else:
-                    console.print(" [dim]No active plan defined.[/dim]\n")
-                continue
-
-            if cmd == "/skills":
-                skills = list_available_skills(workspace=settings.workspace_root)
-                if skills:
-                    console.print(f" [dim]Available skills ({len(skills)}):[/dim] {', '.join(skills)}\n")
-                else:
-                    console.print(" [dim]No skills discovered in .agents/skills or skills/[/dim]\n")
-                continue
-
-            if cmd == "/help":
-                console.print(" [dim]Available commands:[/dim]")
-                console.print("   /plan    View current task plan and TODO status")
-                console.print("   /skills  List discovered skills (.agents/skills, skills/)")
-                console.print("   /clear   Clear terminal screen")
-                console.print("   /exit    Exit SetuCode\n")
+            # First-class slash command handling
+            if cmd_router.is_command(user_input):
+                should_continue = cmd_router.dispatch(user_input, cmd_ctx)
+                if not should_continue:
+                    break
                 continue
 
             # Run agent loop with clean status indicator

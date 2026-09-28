@@ -74,6 +74,32 @@ class SkillRegistry:
 
         return skill
 
+    def deactivate_skill(
+        self, name: str, tool_registry: ToolRegistry | None = None
+    ) -> bool:
+        """Deactivate a skill and unbind any tools it registered."""
+        if name not in self._active_skills:
+            return False
+
+        self._active_skills.remove(name)
+        skill = self.get(name)
+        if tool_registry and skill and skill.tools:
+            for tool in skill.tools:
+                tool_registry.unregister(tool.name)
+                log.info("Unregistered tool '%s' from skill '%s'", tool.name, skill.name)
+        return True
+
+    def toggle_skill(
+        self, name: str, tool_registry: ToolRegistry | None = None
+    ) -> bool:
+        """Toggle active state of a skill. Returns True if now active, False if inactive."""
+        if self.is_active(name):
+            self.deactivate_skill(name, tool_registry)
+            return False
+        else:
+            self.activate_skill(name, tool_registry)
+            return True
+
     def get_active_hints(self) -> list[str]:
         """Get system prompt hints for currently active skills."""
         hints = []
@@ -85,3 +111,4 @@ class SkillRegistry:
 
     def is_active(self, name: str) -> bool:
         return name in self._active_skills
+

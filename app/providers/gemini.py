@@ -4,7 +4,7 @@ from __future__ import annotations
 from google import genai
 from google.genai import types
 
-from app.providers.base import BaseProvider, ModelResponse, ToolCall
+from app.providers.base import BaseProvider, ModelInfo, ModelResponse, ToolCall
 
 
 class GeminiProvider(BaseProvider):
@@ -14,7 +14,63 @@ class GeminiProvider(BaseProvider):
             kwargs["http_options"] = types.HttpOptions(base_url=base_url)
         self._client = genai.Client(**kwargs)
         self._model = model
+        self.model = model
         self.base_url = base_url
+        self.provider_name = "gemini"
+
+    def get_fallback_models(self) -> list[ModelInfo]:
+        """Sensible fallbacks for Google Gemini."""
+        fallback_ids = [
+            self.model or "gemini-2.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+        ]
+        seen = set()
+        result = []
+        for mid in fallback_ids:
+            if mid and mid not in seen:
+                seen.add(mid)
+                result.append(
+                    ModelInfo(
+                        id=mid,
+                        name=mid,
+                        provider="gemini",
+                        is_default=(mid == self.model),
+                    )
+                )
+        return result
+
+    def list_models(self) -> list[ModelInfo]:
+        """Fetch available models from the Gemini API."""
+        if not hasattr(self._client, "models"):
+            return self.get_fallback_models()
+
+        resp = self._client.models.list()
+        models: list[ModelInfo] = []
+
+        for m in resp:
+            m_name = getattr(m, "name", "")
+            clean_id = m_name[7:] if m_name.startswith("models/") else m_name
+            if not clean_id or not ("gemini" in clean_id.lower() or clean_id == self.model):
+                continue
+
+            display_name = getattr(m, "display_name", "") or clean_id
+            label = f"{display_name} ({clean_id})" if display_name and display_name != clean_id else clean_id
+            models.append(
+                ModelInfo(
+                    id=clean_id,
+                    name=label,
+                    description=getattr(m, "description", "") or "",
+                    provider="gemini",
+                    is_default=(clean_id == self.model),
+                )
+            )
+
+        return models or self.get_fallback_models()
+
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
         # Separate system prompt from conversation history

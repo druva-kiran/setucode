@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import anthropic
 
-from app.providers.base import BaseProvider, ModelResponse, ToolCall
+from app.providers.base import BaseProvider, ModelInfo, ModelResponse, ToolCall
 
 
 class AnthropicProvider(BaseProvider):
@@ -13,7 +13,57 @@ class AnthropicProvider(BaseProvider):
             kwargs["base_url"] = base_url
         self._client = anthropic.Anthropic(**kwargs)
         self._model = model
+        self.model = model
         self.base_url = base_url
+        self.provider_name = "claude"
+
+    def get_fallback_models(self) -> list[ModelInfo]:
+        """Sensible fallbacks for Anthropic Claude."""
+        fallback_ids = [
+            self.model or "claude-3-5-sonnet-20241022",
+            "claude-3-7-sonnet-20250219",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229",
+        ]
+        seen = set()
+        result = []
+        for mid in fallback_ids:
+            if mid and mid not in seen:
+                seen.add(mid)
+                result.append(
+                    ModelInfo(
+                        id=mid,
+                        name=mid,
+                        provider="claude",
+                        is_default=(mid == self.model),
+                    )
+                )
+        return result
+
+    def list_models(self) -> list[ModelInfo]:
+        """Fetch available models from the Anthropic API."""
+        if not hasattr(self._client, "models"):
+            return self.get_fallback_models()
+
+        resp = self._client.models.list()
+        data = getattr(resp, "data", resp)
+        models: list[ModelInfo] = []
+
+        for m in data:
+            mid = getattr(m, "id", str(m))
+            display_name = getattr(m, "display_name", mid) or mid
+            models.append(
+                ModelInfo(
+                    id=mid,
+                    name=display_name,
+                    provider="claude",
+                    is_default=(mid == self.model),
+                )
+            )
+
+        return models or self.get_fallback_models()
+
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
         # Anthropic requires the system message to be a top-level param, not in messages
