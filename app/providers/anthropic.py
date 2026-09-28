@@ -7,9 +7,13 @@ from app.providers.base import BaseProvider, ModelResponse, ToolCall
 
 
 class AnthropicProvider(BaseProvider):
-    def __init__(self, api_key: str, model: str) -> None:
-        self._client = anthropic.Anthropic(api_key=api_key)
+    def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
+        kwargs: dict = dict(api_key=api_key or "no-key-required")
+        if base_url:
+            kwargs["base_url"] = base_url
+        self._client = anthropic.Anthropic(**kwargs)
         self._model = model
+        self.base_url = base_url
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
         # Anthropic requires the system message to be a top-level param, not in messages

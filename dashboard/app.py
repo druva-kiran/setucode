@@ -1,11 +1,11 @@
-"""SetuCode CLI — Linux terminal aesthetic.
+"""SetuCode CLI — Minimal, clean terminal interface.
 
-Inspired by zsh/fish prompts and tools like aider, lazygit, gh CLI.
-- Muted colours, information-dense, no decorative emoji
-- ❯ prompt (zsh/fish style)
-- Tool activity as compact dimmed log lines
-- Permission prompt as a drawn box with single-key options
-- Agent output indented with a left bar
+Focuses on clarity, low visual noise, and native markdown rendering:
+- Clean ❯ prompt
+- Native Rich Markdown rendering (true syntax highlighting, no line bars)
+- Clean, minimal tool activity lines without carriage return artifacts
+- Minimal permission confirmations
+- Quick commands: /plan, /skills, /clear, /help, /exit
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ import uuid
 from pathlib import Path
 
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.rule import Rule
 from rich.theme import Theme
 
 from app.agent.loop import run as agent_run
@@ -28,123 +30,84 @@ from app.permissions.manager import PermissionManager
 from app.permissions.policy import PermissionDecision
 from app.permissions.storage import PermissionStorage
 from app.providers import build_provider
+from app.skills.manager import list_available_skills
 from app.tools.registry import build_default_registry
 
-# ── Colour palette ──────────────────────────────────────────────────────────
 theme = Theme({
-    "prompt":   "bold #5f87ff",      # blue — the ❯ glyph
-    "meta":     "dim white",         # dimmed metadata
-    "tool":     "dim cyan",          # tool name in activity log
-    "ok":       "dim green",         # ✓ success marker
-    "err":      "red",               # ✗ / errors
-    "warn":     "yellow",            # warnings
-    "bar":      "dim white",         # │ response left bar
-    "heading":  "bold white",        # section headings
-    "box":      "dim white",         # permission box border
-    "key":      "bold white",        # [a] key hints
-    "path":     "dim #87afff",       # file paths
+    "prompt": "bold cyan",
+    "meta": "dim white",
+    "tool": "cyan",
+    "ok": "green",
+    "err": "red",
+    "warn": "yellow",
+    "path": "dim cyan",
+    "plan": "bold magenta",
 })
 
 console = Console(theme=theme, highlight=False)
 log = logging.getLogger(__name__)
-
-# ── Symbols ──────────────────────────────────────────────────────────────────
-PROMPT_GLYPH  = "❯"
-CONT_GLYPH    = " "      # continuation (no glyph)
-OK_MARK       = "✓"
-ERR_MARK      = "✗"
-WAIT_MARK     = "·"
-RESP_BAR      = "│"
 
 
 # ── Event handler ────────────────────────────────────────────────────────────
 
 def on_event(event: AgentEvent) -> None:
     if event.name == "Thinking":
-        # Subtle — just a waiting dot, overwritten when tool fires
-        console.print(f"  [meta]{WAIT_MARK}[/meta]", end="\r")
+        pass  # Kept quiet for clean, minimal output
 
     elif event.name == "PreToolUse":
         tool = event.data.get("tool", "?")
         args = event.data.get("args", {})
-        path = args.get("path") or args.get("source") or ""
-        # pad tool name to align paths
-        console.print(
-            f"  [meta]{WAIT_MARK}[/meta] [tool]{tool:<18}[/tool] [path]{path}[/path]",
-            end="\r",
-        )
+        path = args.get("path") or args.get("source") or args.get("query") or ""
+        path_str = f" [path]{path}[/path]" if path else ""
+        console.print(f"  [dim]●[/dim] [tool]{tool}[/tool]{path_str}")
 
     elif event.name == "PostToolUse":
-        tool  = event.data.get("tool", "?")
+        tool = event.data.get("tool", "?")
         is_err = event.data.get("error", False)
-        args  = (event.data.get("result") or {})
-        # Clear the \r line then print final status
-        mark  = f"[err]{ERR_MARK}[/err]" if is_err else f"[ok]{OK_MARK}[/ok]"
-        console.print(f"  {mark} [tool]{tool:<18}[/tool]")
+        if is_err:
+            console.print(f"  [err]✗ {tool} failed or denied[/err]")
 
     elif event.name == "Stop":
         reason = event.data.get("reason", "done")
         if "error" in reason.lower():
-            console.print(f"\n  [err]{ERR_MARK} {reason}[/err]")
+            console.print(f"  [err]✗ {reason}[/err]")
 
 
 # ── Permission prompt ────────────────────────────────────────────────────────
 
-def _box(lines: list[str], width: int = 54) -> str:
-    """Return a simple unicode box around lines."""
-    inner = width - 2
-    top    = "┌" + "─" * inner + "┐"
-    bottom = "└" + "─" * inner + "┘"
-    rows   = [top]
-    for line in lines:
-        # truncate if needed
-        visible = line[:inner]
-        padding = " " * (inner - len(visible))
-        rows.append("│" + visible + padding + "│")
-    rows.append(bottom)
-    return "\n".join(rows)
-
-
 def request_permission(tool_name: str, path: str) -> PermissionDecision:
     console.print()
-    box_lines = [
-        f"  permission required",
-        f"",
-        f"  tool  {tool_name}",
-        f"  path  {path[:44]}",
-        f"",
-        f"  [a] allow once   [s] always   [d] deny",
-    ]
-    # Print box in dim white
-    for line in _box(box_lines).splitlines():
-        console.print(f"  [box]{line}[/box]")
-    console.print()
+    display_path = f" on [path]{path}[/path]" if path else ""
+    console.print(f"  [bold yellow]?[/bold yellow] Allow [bold]{tool_name}[/bold]{display_path}?")
+    console.print("    [bold]a[/bold] allow once  [dim]│[/dim]  [bold]s[/bold] allow always  [dim]│[/dim]  [bold]d[/bold] deny")
 
     while True:
         try:
-            raw = input("  ❯ ").strip().lower()
+            raw = input("    ❯ ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return PermissionDecision.DENY
-        if raw in ("a", "1", "allow"):
+
+        if raw in ("a", "1", "allow", "y", "yes"):
             return PermissionDecision.ALLOW_ONCE
         if raw in ("s", "2", "always"):
             return PermissionDecision.ALLOW_ALWAYS
-        if raw in ("d", "3", "deny", "n", "no"):
+        if raw in ("d", "3", "deny", "n", "no", ""):
             return PermissionDecision.DENY
-        console.print(f"  [meta]a · s · d[/meta]")
+
+        console.print("    [meta]Please enter 'a' (once), 's' (always), or 'd' (deny)[/meta]")
 
 
-# ── Response printer ─────────────────────────────────────────────────────────
+# ── Response renderer ────────────────────────────────────────────────────────
 
 def _print_response(text: str) -> None:
-    """Print agent response with a left bar, like a quoted block."""
+    """Render agent response as native, clean Markdown with syntax highlighting."""
     console.print()
-    for line in text.splitlines():
-        console.print(f"  [bar]{RESP_BAR}[/bar] {line}")
+    if text:
+        console.print(Markdown(text))
     console.print()
 
 
-# ── Main REPL loop ───────────────────────────────────────────────────────────
+# ── Main REPL session ────────────────────────────────────────────────────────
 
 def run_session(settings: Settings) -> None:
     memory = MemoryManager(settings.user_memory_path)
@@ -152,13 +115,13 @@ def run_session(settings: Settings) -> None:
     try:
         provider = build_provider(settings)
     except ValueError as e:
-        console.print(f"\n  [err]{ERR_MARK}[/err] {e}")
-        console.print("  run [heading]setucode --setup[/heading] to configure\n")
+        console.print(f"\n[err]✗ Configuration error:[/err] {e}")
+        console.print("[dim]Run 'setucode --setup' to configure a valid provider.[/dim]\n")
         return
 
     registry = build_default_registry(settings.workspace_root)
-    storage  = PermissionStorage(settings.permission_storage_path)
-    perms    = PermissionManager(storage, request_permission)
+    storage = PermissionStorage(settings.permission_storage_path)
+    perms = PermissionManager(storage, request_permission)
 
     state = AgentState(
         session_id=str(uuid.uuid4()),
@@ -172,40 +135,80 @@ def run_session(settings: Settings) -> None:
     bus = EventBus()
     bus.subscribe(on_event)
 
+    # Clean, minimal single-line status banner
+    endpoint_info = ""
+    if settings.openai_base_url:
+        endpoint_info = f" [dim]({settings.openai_base_url})[/dim]"
+    elif settings.anthropic_base_url:
+        endpoint_info = f" [dim]({settings.anthropic_base_url})[/dim]"
+    elif settings.gemini_base_url:
+        endpoint_info = f" [dim]({settings.gemini_base_url})[/dim]"
+
     console.print()
-    console.print(f"  [heading]setucode[/heading]  [meta]{settings.provider}/{settings.model}[/meta]")
-    console.print(f"  [meta]workspace  {settings.workspace_root}[/meta]")
-    console.print(f"  [meta]ctrl+c to quit · /help for commands[/meta]")
-    console.print()
+    console.print(
+        f" [bold cyan]SetuCode[/bold cyan] [dim]│[/dim] "
+        f"[white]{settings.provider}[/white]:[dim]{settings.model}[/dim]{endpoint_info} [dim]│[/dim] "
+        f"[dim]{settings.workspace_root}[/dim]"
+    )
+    console.print(" [dim]Type your message. Commands: /plan, /skills, /clear, /exit[/dim]\n")
 
     try:
         while True:
-            # ❯ prompt — bold blue
             try:
-                console.print(f"[prompt]{PROMPT_GLYPH}[/prompt] ", end="")
+                console.print("[prompt]❯[/prompt] ", end="")
                 user_input = input().strip()
             except (EOFError, KeyboardInterrupt):
-                console.print("\n")
+                console.print()
                 break
 
             if not user_input:
                 continue
 
-            if user_input.lower() in ("/quit", "/exit", "exit", "quit", "q"):
-                console.print()
+            # Command handling
+            cmd = user_input.lower()
+            if cmd in ("/quit", "/exit", "exit", "quit", "q"):
+                console.print("[dim]Goodbye.[/dim]\n")
                 break
 
-            # separator before agent activity
-            console.print()
+            if cmd == "/clear":
+                os.system("cls" if os.name == "nt" else "clear")
+                continue
 
-            result = agent_run(state, user_input, bus, registry, perms)
+            if cmd == "/plan":
+                plan = getattr(state, "plan", None)
+                if plan and plan.tasks:
+                    console.print(Markdown(plan.render()))
+                else:
+                    console.print(" [dim]No active plan defined.[/dim]\n")
+                continue
+
+            if cmd == "/skills":
+                skills = list_available_skills(workspace=settings.workspace_root)
+                if skills:
+                    console.print(f" [dim]Available skills ({len(skills)}):[/dim] {', '.join(skills)}\n")
+                else:
+                    console.print(" [dim]No skills discovered in .agents/skills or skills/[/dim]\n")
+                continue
+
+            if cmd == "/help":
+                console.print(" [dim]Available commands:[/dim]")
+                console.print("   /plan    View current task plan and TODO status")
+                console.print("   /skills  List discovered skills (.agents/skills, skills/)")
+                console.print("   /clear   Clear terminal screen")
+                console.print("   /exit    Exit SetuCode\n")
+                continue
+
+            # Run agent loop with clean status indicator
+            with console.status("[dim]Thinking...[/dim]", spinner="dots"):
+                result = agent_run(state, user_input, bus, registry, perms)
+
             _print_response(result)
 
     finally:
         try:
             memory.write_session_memories(state.messages, provider)
         except Exception as e:
-            log.error("memory write: %s", e)
+            log.error("memory write error: %s", e)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -225,13 +228,13 @@ def main() -> None:
     settings = load_settings()
 
     if not settings.provider:
-        console.print("\n  [warn]no provider configured[/warn] — running setup\n")
+        console.print("\n [warn]No provider configured[/warn] — launching setup wizard.\n")
         from dashboard.setup_wizard import run_setup_cli
         run_setup_cli()
         settings = load_settings()
 
     if not settings.provider:
-        console.print("  [err]setup incomplete.[/err] run [heading]setucode --setup[/heading]\n")
+        console.print(" [err]Setup incomplete.[/err] Run [heading]setucode --setup[/heading]\n")
         return
 
     run_session(settings)

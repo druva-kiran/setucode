@@ -8,9 +8,13 @@ from app.providers.base import BaseProvider, ModelResponse, ToolCall
 
 
 class GeminiProvider(BaseProvider):
-    def __init__(self, api_key: str, model: str) -> None:
-        self._client = genai.Client(api_key=api_key)
+    def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
+        kwargs: dict = dict(api_key=api_key or "no-key-required")
+        if base_url:
+            kwargs["http_options"] = types.HttpOptions(base_url=base_url)
+        self._client = genai.Client(**kwargs)
         self._model = model
+        self.base_url = base_url
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
         # Separate system prompt from conversation history

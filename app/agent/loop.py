@@ -120,7 +120,7 @@ def run(
 
     # --- Feature 2: Detect & Inject relevant skills ---
     from app.skills.manager import inject_skill_hints
-    inject_skill_hints(state.messages, user_message, tool_registry=registry)
+    inject_skill_hints(state.messages, user_message, tool_registry=registry, workspace=state.workspace)
 
     # --- Feature 3: Inject initial plan into late context ---
     if getattr(state, "plan", None):

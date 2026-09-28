@@ -139,3 +139,39 @@ def test_inject_skill_hints_deduplication():
     injected2 = inject_skill_hints(messages, "please refactor more", registry=registry)
     assert len(injected2) == 0
     assert len(messages) == 2
+
+
+def test_get_standard_skill_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """get_standard_skill_paths includes workspace .agents/skills, .agent/skills, and SKILLS_PATH."""
+    from app.skills.manager import get_standard_skill_paths
+
+    ws = tmp_path / "my_project"
+    ws.mkdir()
+
+    monkeypatch.setenv("SKILLS_PATH", f"{tmp_path}/custom_skills1;{tmp_path}/custom_skills2")
+    paths = get_standard_skill_paths(ws)
+
+    # Check that workspace .agents/skills is prioritized
+    assert any(".agents" in str(p) and "my_project" in str(p) for p in paths)
+    assert any(".agent" in str(p) and "my_project" in str(p) for p in paths)
+    assert any("skills" in str(p) and "my_project" in str(p) for p in paths)
+    assert any("custom_skills1" in str(p) for p in paths)
+    assert any("custom_skills2" in str(p) for p in paths)
+
+
+def test_build_skill_registry_discovers_agents_skills(tmp_path: Path):
+    """build_skill_registry discovers skills placed in workspace/.agents/skills."""
+    from app.skills.manager import build_skill_registry
+
+    ws = tmp_path / "workspace"
+    agents_skills = ws / ".agents" / "skills" / "deploy-helper"
+    agents_skills.mkdir(parents=True)
+    (agents_skills / "SKILL.md").write_text(
+        "---\nname: deploy-helper\ndescription: Helper for deployments\nactivation_conditions:\n  - deploy\n---\nDeployment guide.",
+        encoding="utf-8",
+    )
+
+    registry = build_skill_registry(ws)
+    skill_names = [s.name for s in registry.list_all()]
+    assert "deploy-helper" in skill_names
+
