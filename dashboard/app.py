@@ -48,6 +48,33 @@ console = Console(theme=theme, highlight=False)
 log = logging.getLogger(__name__)
 
 
+def _format_tool_action(tool: str, args: dict) -> tuple[str, str]:
+    """Human-friendly verb and target for tool actions."""
+    path = args.get("path") or args.get("source") or args.get("destination") or args.get("query") or ""
+
+    match tool:
+        case "read_file":
+            return "Read", path
+        case "write_file":
+            return "Write", path
+        case "edit_file":
+            return "Edit", path
+        case "move_file":
+            dest = args.get("destination", "")
+            return "Move", f"{path} → {dest}" if dest else path
+        case "list_directory":
+            return "Explore", path or "."
+        case "search_files":
+            return "Search", f'"{path}"'
+        case "get_plan" | "update_plan_task" | "add_plan_task":
+            return "Plan", tool.replace("_", " ")
+        case "delegate_task":
+            role = args.get("role", "subagent")
+            return f"Delegate ({role})", args.get("task", "")[:40]
+        case _:
+            return tool, path
+
+
 # ── Event handler ────────────────────────────────────────────────────────────
 
 def on_event(event: AgentEvent) -> None:
@@ -57,20 +84,20 @@ def on_event(event: AgentEvent) -> None:
     elif event.name == "PreToolUse":
         tool = event.data.get("tool", "?")
         args = event.data.get("args", {})
-        path = args.get("path") or args.get("source") or args.get("query") or ""
-        path_str = f" [path]{path}[/path]" if path else ""
-        console.print(f"  [dim]●[/dim] [tool]{tool}[/tool]{path_str}")
+        action, target = _format_tool_action(tool, args)
+        target_str = f" [white]{target}[/white]" if target else ""
+        console.print(f"    [dim]●[/dim] [dim cyan]{action}[/dim cyan]{target_str}")
 
     elif event.name == "PostToolUse":
         tool = event.data.get("tool", "?")
         is_err = event.data.get("error", False)
         if is_err:
-            console.print(f"  [err]✗ {tool} failed or denied[/err]")
+            console.print(f"    [err]✗ {tool} failed or denied[/err]")
 
     elif event.name == "Stop":
         reason = event.data.get("reason", "done")
         if "error" in reason.lower():
-            console.print(f"  [err]✗ {reason}[/err]")
+            console.print(f"    [err]✗ {reason}[/err]")
 
 
 # ── Permission prompt ────────────────────────────────────────────────────────
@@ -100,10 +127,17 @@ def request_permission(tool_name: str, path: str) -> PermissionDecision:
 # ── Response renderer ────────────────────────────────────────────────────────
 
 def _print_response(text: str) -> None:
-    """Render agent response as native, clean Markdown with syntax highlighting."""
+    """Render agent response as native, clean Markdown with syntax highlighting, indentation, and breathing room."""
+    if not text or not text.strip():
+        return
+
+    from rich.padding import Padding
+
+    # Maximum comfortable line width for reading (80-100 chars)
+    render_width = min(console.width - 8, 100) if console.width > 105 else max(console.width - 4, 50)
+
     console.print()
-    if text:
-        console.print(Markdown(text))
+    console.print(Padding(Markdown(text.strip()), (0, 0, 0, 4)), width=render_width)
     console.print()
 
 
@@ -168,7 +202,7 @@ def run_session(settings: Settings) -> None:
     try:
         while True:
             try:
-                console.print("[prompt]❯[/prompt] ", end="")
+                console.print("  [prompt]❯[/prompt] ", end="")
                 user_input = input().strip()
             except (EOFError, KeyboardInterrupt):
                 console.print()
@@ -176,6 +210,8 @@ def run_session(settings: Settings) -> None:
 
             if not user_input:
                 continue
+
+            console.print()
 
             # First-class slash command handling
             if cmd_router.is_command(user_input):
@@ -185,7 +221,7 @@ def run_session(settings: Settings) -> None:
                 continue
 
             # Run agent loop with clean status indicator
-            with console.status("[dim]Thinking...[/dim]", spinner="dots"):
+            with console.status("    [dim]Thinking...[/dim]", spinner="dots"):
                 result = agent_run(state, user_input, bus, registry, perms)
 
             _print_response(result)
