@@ -122,3 +122,23 @@ def test_persist_selected_model_updates_env(tmp_path: Path):
     content = env_file.read_text(encoding="utf-8")
     assert "LLM_MODEL=gpt-4o-mini" in content
     assert "LLM_MODEL=gpt-4o\n" not in content
+
+
+def test_setup_wizard_does_not_ask_for_model_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Setup wizard does not ask user to manually type model name."""
+    from dashboard.setup_wizard import run_setup_cli
+
+    # Inputs: choice 4, default endpoint (Enter), empty key (Enter), default workspace (Enter)
+    inputs = iter(["4", "", "", ""])
+    monkeypatch.setattr("builtins.input", lambda *args: next(inputs))
+    monkeypatch.chdir(tmp_path)
+
+    run_setup_cli()
+
+    env_file = tmp_path / ".env"
+    assert env_file.exists()
+    content = env_file.read_text(encoding="utf-8")
+    assert "LLM_PROVIDER=openai" in content
+    assert "LLM_MODEL=llama3.2" in content
+    assert "OPENAI_BASE_URL=http://localhost:11434/v1" in content
+

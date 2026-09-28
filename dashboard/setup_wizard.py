@@ -32,8 +32,6 @@ def run_setup_cli() -> None:
 
     provider_id, key_name, default_model, endpoint_env_var = _PROVIDERS[choice]
 
-    model = input(f"Model name [{default_model}]: ").strip() or default_model
-
     endpoint = ""
     if choice == "4":
         endpoint = input("Custom Base URL [http://localhost:11434/v1]: ").strip() or "http://localhost:11434/v1"
@@ -46,6 +44,53 @@ def run_setup_cli() -> None:
 
     workspace = input("Workspace path [./workspace]: ").strip() or "./workspace"
 
+    # Auto-discover models or use sensible default without asking user to manually type model names
+    model = default_model
+    try:
+        from app.config.settings import Settings
+        from app.providers import build_provider
+        from dashboard.keyboard import is_interactive
+
+        temp_settings = Settings(
+            provider=provider_id,
+            model=default_model,
+            anthropic_api_key=api_key if provider_id == "claude" else "",
+            openai_api_key=api_key if provider_id == "openai" else "",
+            gemini_api_key=api_key if provider_id == "gemini" else "",
+            anthropic_base_url=endpoint if provider_id == "claude" else "",
+            openai_base_url=endpoint if provider_id == "openai" else "",
+            gemini_base_url=endpoint if provider_id == "gemini" else "",
+        )
+        prov = build_provider(temp_settings)
+        print(f"\nChecking connection to {provider_id}...")
+        models, err = prov.get_available_models()
+        if models and len(models) > 1 and is_interactive():
+            from dashboard.selector import SelectItem, run_interactive_selector
+            from rich.console import Console
+            console = Console()
+            items = [
+                SelectItem(
+                    id=m.id,
+                    title=m.name or m.id,
+                    badge="[default]" if m.id == default_model else (f"[{m.provider}]" if m.provider else ""),
+                    is_current=(m.id == default_model),
+                )
+                for m in models
+            ]
+            sel = run_interactive_selector(
+                console,
+                title="Select Initial Model",
+                items=items,
+                current_id=default_model,
+                footer_hint="↑ ↓  Navigate  │  Enter  Select  │  Esc  Use Default",
+            )
+            if sel:
+                model = sel.id
+        elif models:
+            model = models[0].id
+    except Exception:
+        model = default_model
+
     _write_env(provider_id, model, key_name, api_key, workspace, endpoint_env_var, endpoint)
 
     print("\n✓ Configuration saved to .env")
@@ -54,7 +99,7 @@ def run_setup_cli() -> None:
     if endpoint:
         print(f"  Endpoint : {endpoint}")
     print(f"  Workspace: {workspace}")
-    print("\nRun setucode to begin coding.\n")
+    print("\nRun setucode to begin coding. Use /model anytime to change models.\n")
 
 
 def _write_env(
