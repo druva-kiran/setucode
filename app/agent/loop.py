@@ -136,7 +136,7 @@ def run(
     provider_name = type(state.model).__name__
 
     iteration_count = 0
-    max_iterations = 30
+    max_iterations = 100
 
     while True:
         iteration_count += 1

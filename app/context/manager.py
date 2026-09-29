@@ -69,16 +69,23 @@ class ContextManager:
         return False
 
     def inject_pending_late_context(self, state: AgentState) -> bool:
-        """Inject any pending late context items as a system message before the next LLM call."""
+        """Inject any pending late context items without corrupting message alternation or adding duplicates."""
         rendered = self.late_context.render_markdown()
         if not rendered:
             return False
 
-        state.messages.append({
-            "role": "system",
-            "content": rendered,
-            "_late_injection": True,
-        })
+        # If system prompt already exists at index 0, update or append cleanly
+        if state.messages and state.messages[0].get("role") == "system":
+            # Don't inject duplicate system messages in the middle of tool calling turns
+            base_sys = state.messages[0].get("content", "")
+            if "## Relevant Dynamic Context" not in base_sys:
+                state.messages[0]["content"] = f"{base_sys}\n\n{rendered}"
+        else:
+            state.messages.insert(0, {
+                "role": "system",
+                "content": rendered,
+                "_late_injection": True,
+            })
         self.late_context.clear_transient()
         return True
 
