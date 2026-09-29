@@ -1,6 +1,7 @@
 """Anthropic Claude provider implementation."""
 from __future__ import annotations
 
+import json
 import anthropic
 
 from app.providers.base import BaseProvider, ModelInfo, ModelResponse, ToolCall
@@ -66,14 +67,95 @@ class AnthropicProvider(BaseProvider):
 
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
-        # Anthropic requires the system message to be a top-level param, not in messages
         system_msg = ""
         filtered = []
+
         for m in messages:
-            if m.get("role") == "system":
+            role = m.get("role")
+
+            if role == "system":
                 system_msg = m.get("content", "")
+
+            elif role == "tool":
+                tool_use_id = m.get("tool_call_id") or m.get("tool_use_id")
+                tool_result_content = {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": str(m.get("content", ""))
+                }
+
+                if filtered and filtered[-1]["role"] == "user":
+                    prev_content = filtered[-1]["content"]
+                    if isinstance(prev_content, str):
+                        filtered[-1]["content"] = [{"type": "text", "text": prev_content}]
+                    elif not isinstance(prev_content, list):
+                        filtered[-1]["content"] = [{"type": "text", "text": str(prev_content)}]
+                    filtered[-1]["content"].append(tool_result_content)
+                else:
+                    filtered.append({
+                        "role": "user",
+                        "content": [tool_result_content]
+                    })
+
+            elif role == "assistant" and m.get("tool_calls"):
+                content_blocks = []
+                if m.get("content"):
+                    content_blocks.append({"type": "text", "text": str(m["content"])})
+
+                for tc in m["tool_calls"]:
+                    tc_id = getattr(tc, "id", None) if not isinstance(tc, dict) else tc.get("id")
+
+                    tc_name = getattr(tc, "name", None) if not isinstance(tc, dict) else tc.get("name")
+                    if not tc_name:
+                        func = getattr(tc, "function", None) if not isinstance(tc, dict) else tc.get("function", {})
+                        tc_name = getattr(func, "name", None) if not isinstance(func, dict) else func.get("name")
+
+                    tc_args = getattr(tc, "args", getattr(tc, "arguments", None)) if not isinstance(tc, dict) else tc.get("args", tc.get("arguments"))
+                    if tc_args is None:
+                        func = getattr(tc, "function", None) if not isinstance(tc, dict) else tc.get("function", {})
+                        tc_args = getattr(func, "arguments", "{}") if not isinstance(func, dict) else func.get("arguments", "{}")
+
+                    if isinstance(tc_args, str):
+                        try:
+                            tc_args = json.loads(tc_args)
+                        except Exception:
+                            tc_args = {}
+
+                    if tc_args is None:
+                        tc_args = {}
+
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": tc_id,
+                        "name": tc_name,
+                        "input": tc_args
+                    })
+
+                filtered.append({
+                    "role": "assistant",
+                    "content": content_blocks
+                })
+
+            elif role == "user":
+                if filtered and filtered[-1]["role"] == "user":
+                    prev_content = filtered[-1]["content"]
+                    curr_content = m.get("content", "")
+                    if isinstance(prev_content, str):
+                        filtered[-1]["content"] = [{"type": "text", "text": prev_content}]
+                    elif not isinstance(prev_content, list):
+                        filtered[-1]["content"] = [{"type": "text", "text": str(prev_content)}]
+                    filtered[-1]["content"].append({"type": "text", "text": str(curr_content)})
+                else:
+                    filtered.append({
+                        "role": "user",
+                        "content": m.get("content", "")
+                    })
+
             else:
-                filtered.append(m)
+                filtered.append({
+                    "role": role,
+                    "content": m.get("content", "")
+                })
 
         # Convert generic tool schema to Anthropic format
         anthropic_tools = [

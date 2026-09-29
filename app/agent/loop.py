@@ -135,7 +135,16 @@ def run(
     log.info("User message received: %r", user_message[:120])
     provider_name = type(state.model).__name__
 
+    iteration_count = 0
+    max_iterations = 30
+
     while True:
+        iteration_count += 1
+        if iteration_count > max_iterations:
+            log.warning("Max loop iterations reached (%d)", max_iterations)
+            state.status = AgentStatus.FINISHED
+            bus.emit(Stop(reason=f"Reached maximum tool execution limit ({max_iterations} steps)."))
+            return f"I have reached the maximum tool step limit ({max_iterations} iterations). Here is my current progress based on the actions completed so far."
         # --- Feature 6 & 7: Check token budget and compact if needed ---
         state.context_manager.check_and_compact(state)
 

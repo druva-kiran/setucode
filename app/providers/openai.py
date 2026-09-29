@@ -108,6 +108,48 @@ class OpenAIProvider(BaseProvider):
 
 
     def generate(self, messages: list[dict], tools: list[dict]) -> ModelResponse:
+        import json
+
+        # Normalise messages for OpenAI Chat Completions API
+        formatted_messages = []
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content")
+
+            if role == "tool":
+                formatted_messages.append({
+                    "role": "tool",
+                    "tool_call_id": m.get("tool_call_id") or m.get("tool_use_id", ""),
+                    "content": str(content) if content is not None else "",
+                })
+            elif role == "assistant" and m.get("tool_calls"):
+                tcs = []
+                for tc in m["tool_calls"]:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
+                    tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                    tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                    if not isinstance(tc_args, str):
+                        tc_args = json.dumps(tc_args or {})
+
+                    tcs.append({
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc_name,
+                            "arguments": tc_args,
+                        },
+                    })
+                formatted_messages.append({
+                    "role": "assistant",
+                    "content": content or None,
+                    "tool_calls": tcs,
+                })
+            else:
+                formatted_messages.append({
+                    "role": role,
+                    "content": content if content is not None else "",
+                })
+
         # Convert generic schema to OpenAI function format
         openai_tools = [
             {
@@ -121,7 +163,7 @@ class OpenAIProvider(BaseProvider):
             for t in tools
         ] if tools else []
 
-        kwargs: dict = dict(model=self._model, messages=messages)
+        kwargs: dict = dict(model=self._model, messages=formatted_messages)
         if openai_tools:
             kwargs["tools"] = openai_tools
 

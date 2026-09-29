@@ -56,8 +56,8 @@ def build_default_registry(workspace_root: Path) -> ToolRegistry:
     from app.tools.edit_file import make_edit_file
     from app.tools.move_file import make_move_file
     from app.tools.list_directory import make_list_directory
-
     from app.tools.search_files import make_search_files
+    from app.tools.run_command import make_run_command
 
     registry = ToolRegistry()
 
@@ -154,6 +154,31 @@ def build_default_registry(workspace_root: Path) -> ToolRegistry:
         },
         execute=make_move_file(workspace_root),
         permission_category="modifying",
+    ))
+
+    registry.register(Tool(
+        name="run_command",
+        description=(
+            "Run a shell command inside the workspace directory. Use this to run tests, "
+            "build the project, execute scripts, or perform any command-line operation. "
+            "Output is captured and returned."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to execute inside the workspace root.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Optional timeout in seconds (default: 30, max: 120).",
+                },
+            },
+            "required": ["command"],
+        },
+        execute=make_run_command(workspace_root),
+        permission_category="high_risk",
     ))
 
     return registry

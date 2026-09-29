@@ -210,3 +210,22 @@ class TestWorkspaceBoundary:
             # Symlink resolves outside workspace_root → should be blocked
             assert result.is_error
             assert "outside workspace" in result.error
+
+
+# ---------------------------------------------------------------------------
+# run_command tool
+# ---------------------------------------------------------------------------
+
+class TestRunCommand:
+    def test_run_simple_command(self, workspace, registry):
+        tool = registry.get("run_command")
+        assert tool is not None
+        result = tool.execute({"command": "echo hello_setucode"})
+        assert not result.is_error
+        assert "hello_setucode" in result.output
+
+    def test_run_empty_command(self, workspace, registry):
+        tool = registry.get("run_command")
+        result = tool.execute({"command": ""})
+        assert result.is_error
+

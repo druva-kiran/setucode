@@ -107,8 +107,8 @@ def handle_model(ctx: CommandContext, args: str) -> bool:
 
     # 2. Interactive discovery and selection
     provider_name = getattr(ctx.provider, "provider_name", ctx.settings.provider)
-    with ctx.console.status(f"[dim]Fetching available models from {provider_name}...[/dim]", spinner="dots"):
-        models, warning_or_error = ctx.provider.get_available_models()
+    ctx.console.print(f" [dim]Fetching available models from {provider_name}...[/dim]")
+    models, warning_or_error = ctx.provider.get_available_models()
 
     if warning_or_error:
         ctx.console.print(f" [warn]Notice:[/warn] {warning_or_error}")
@@ -324,8 +324,32 @@ def handle_plan(ctx: CommandContext, args: str) -> bool:
 
 
 def handle_clear(ctx: CommandContext, args: str) -> bool:
-    """Handle /clear — clear terminal screen."""
+    """Handle /clear — clear terminal screen and (optionally) history."""
+    if args.strip() == "all":
+        ctx.state.messages.clear()
+        ctx.console.print(" [dim]Conversation history and screen cleared.[/dim]\n")
+    else:
+        ctx.console.print(" [dim]Screen cleared. Use '/clear all' to clear history.[/dim]\n")
     os.system("cls" if os.name == "nt" else "clear")
+    return True
+
+def handle_compact(ctx: CommandContext, args: str) -> bool:
+    """Handle /compact — view token usage and compact history."""
+    from app.context.prefix_cache import PrefixCache
+    metrics = PrefixCache.get_metrics()
+
+    ctx.console.print("\n[bold cyan]Context Window Status[/bold cyan]")
+    ctx.console.print(f"  Messages in context: [bold white]{len(ctx.state.messages)}[/bold white]")
+    ctx.console.print(f"  Cached Tokens Used : [bold green]{metrics.cached_tokens}[/bold green]")
+    ctx.console.print(f"  Uncached Tokens    : [bold yellow]{metrics.uncached_tokens}[/bold yellow]")
+
+    if args.strip() == "now" and ctx.state.context_manager:
+        ctx.console.print("\n[dim]Compacting history...[/dim]")
+        ctx.state.context_manager.compact_history(ctx.state)
+        ctx.console.print(f"  [ok]✓[/ok] Messages reduced to: [bold white]{len(ctx.state.messages)}[/bold white]\n")
+    else:
+        ctx.console.print("\n  [dim]Run '/compact now' to force history compaction.[/dim]\n")
+
     return True
 
 
@@ -373,9 +397,25 @@ def build_default_command_router() -> CommandRouter:
     router.register(
         Command(
             name="clear",
-            description="Clear terminal screen",
-            usage="/clear",
+            description="Clear terminal screen ('/clear all' to clear context)",
+            usage="/clear [all]",
             handler=handle_clear,
+        )
+    )
+    router.register(
+        Command(
+            name="compact",
+            description="View token budget or manually compact context",
+            usage="/compact [now]",
+            handler=handle_compact,
+        )
+    )
+    router.register(
+        Command(
+            name="context",
+            description="Alias for /compact",
+            usage="/context",
+            handler=handle_compact,
         )
     )
     router.register(

@@ -68,6 +68,9 @@ def _format_tool_action(tool: str, args: dict) -> tuple[str, str]:
             return "Search", f'"{path}"'
         case "get_plan" | "update_plan_task" | "add_plan_task":
             return "Plan", tool.replace("_", " ")
+        case "run_command":
+            cmd = args.get("command", "")
+            return "Run", cmd[:60] + ("…" if len(cmd) > 60 else "")
         case "delegate_task":
             role = args.get("role", "subagent")
             return f"Delegate ({role})", args.get("task", "")[:40]
@@ -79,34 +82,42 @@ def _format_tool_action(tool: str, args: dict) -> tuple[str, str]:
 
 def on_event(event: AgentEvent) -> None:
     if event.name == "Thinking":
-        pass  # Kept quiet for clean, minimal output
+        console.print(f"  [dim cyan]⚡ Thinking...[/dim cyan]")
 
     elif event.name == "PreToolUse":
         tool = event.data.get("tool", "?")
         args = event.data.get("args", {})
         action, target = _format_tool_action(tool, args)
         target_str = f" [white]{target}[/white]" if target else ""
-        console.print(f"    [dim]●[/dim] [dim cyan]{action}[/dim cyan]{target_str}")
+        console.print(f"  [bold cyan]●[/bold cyan] [bold cyan]{action}[/bold cyan]{target_str}")
 
     elif event.name == "PostToolUse":
         tool = event.data.get("tool", "?")
         is_err = event.data.get("error", False)
         if is_err:
-            console.print(f"    [err]✗ {tool} failed or denied[/err]")
+            error_data = event.data.get("result", {})
+            error_msg = getattr(error_data, "error", "Unknown error")
+            console.print(f"  [bold red]✗ {tool} failed:[/bold red] [dim red]{error_msg}[/dim red]")
+        else:
+            console.print(f"  [dim green]✓ {tool} completed[/dim green]")
 
     elif event.name == "Stop":
         reason = event.data.get("reason", "done")
         if "error" in reason.lower():
-            console.print(f"    [err]✗ {reason}[/err]")
+            console.print(f"  [bold red]✗ {reason}[/bold red]")
 
 
 # ── Permission prompt ────────────────────────────────────────────────────────
 
 def request_permission(tool_name: str, path: str) -> PermissionDecision:
     console.print()
-    display_path = f" on [path]{path}[/path]" if path else ""
-    console.print(f"  [bold yellow]?[/bold yellow] Allow [bold]{tool_name}[/bold]{display_path}?")
-    console.print("    [bold]a[/bold] allow once  [dim]│[/dim]  [bold]s[/bold] allow always  [dim]│[/dim]  [bold]d[/bold] deny")
+    display_path = f" [path]{path}[/path]" if path else ""
+    console.print(f"  [bold yellow]?[/bold yellow] Allow [bold magenta]{tool_name}[/bold magenta]{display_path}?")
+    console.print(
+        "    [bold silver]a[/bold silver] Allow once  [dim]•[/dim]  "
+        "[bold silver]s[/bold silver] Allow always  [dim]•[/dim]  "
+        "[bold silver]d[/bold silver] Deny"
+    )
 
     while True:
         try:
@@ -114,36 +125,47 @@ def request_permission(tool_name: str, path: str) -> PermissionDecision:
         except (EOFError, KeyboardInterrupt):
             return PermissionDecision.DENY
 
-        if raw in ("a", "1", "allow", "y", "yes"):
+        if raw in ("a", "allow", "y", "yes"):
             return PermissionDecision.ALLOW_ONCE
-        if raw in ("s", "2", "always"):
+        if raw in ("s", "always"):
             return PermissionDecision.ALLOW_ALWAYS
-        if raw in ("d", "3", "deny", "n", "no", ""):
+        if raw in ("d", "deny", "n", "no", ""):
             return PermissionDecision.DENY
 
-        console.print("    [meta]Please enter 'a' (once), 's' (always), or 'd' (deny)[/meta]")
+        console.print("    [dim red]Invalid option. Enter 'a', 's', or 'd'.[/dim red]")
 
 
 # ── Response renderer ────────────────────────────────────────────────────────
 
 def _print_response(text: str) -> None:
-    """Render agent response as native, clean Markdown with syntax highlighting, indentation, and breathing room."""
+    """Render agent response as clean Markdown in a bordered panel."""
     if not text or not text.strip():
         return
 
     from rich.padding import Padding
+    from rich.panel import Panel
 
-    # Maximum comfortable line width for reading (80-100 chars)
-    render_width = min(console.width - 8, 100) if console.width > 105 else max(console.width - 4, 50)
+    render_width = min(console.width - 4, 100)
+
+    response_panel = Panel(
+        Markdown(text.strip()),
+        border_style="dim cyan",
+        padding=(1, 2),
+        expand=False,
+        title="[dim white]SetuCode[/dim white]",
+        title_align="left",
+    )
 
     console.print()
-    console.print(Padding(Markdown(text.strip()), (0, 0, 0, 4)), width=render_width)
+    console.print(Padding(response_panel, (0, 0, 0, 1)), width=render_width)
     console.print()
 
 
 # ── Main REPL session ────────────────────────────────────────────────────────
 
 def run_session(settings: Settings) -> None:
+    from rich.panel import Panel
+
     memory = MemoryManager(settings.user_memory_path)
 
     try:
@@ -169,15 +191,6 @@ def run_session(settings: Settings) -> None:
     bus = EventBus()
     bus.subscribe(on_event)
 
-    # Clean, minimal single-line status banner
-    endpoint_info = ""
-    if settings.openai_base_url:
-        endpoint_info = f" [dim]({settings.openai_base_url})[/dim]"
-    elif settings.anthropic_base_url:
-        endpoint_info = f" [dim]({settings.anthropic_base_url})[/dim]"
-    elif settings.gemini_base_url:
-        endpoint_info = f" [dim]({settings.gemini_base_url})[/dim]"
-
     from dashboard.commands import CommandContext, build_default_command_router
 
     cmd_router = build_default_command_router()
@@ -191,18 +204,35 @@ def run_session(settings: Settings) -> None:
         bus=bus,
     )
 
+    # -- Welcome banner --
+    endpoint_info = ""
+    if settings.openai_base_url:
+        endpoint_info = f"\n  Endpoint : [dim]{settings.openai_base_url}[/dim]"
+    elif settings.anthropic_base_url:
+        endpoint_info = f"\n  Endpoint : [dim]{settings.anthropic_base_url}[/dim]"
+    elif settings.gemini_base_url:
+        endpoint_info = f"\n  Endpoint : [dim]{settings.gemini_base_url}[/dim]"
+
     console.print()
+    console.print(Panel(
+        f"  [bold white]SetuCode[/bold white] [dim]v0.1[/dim]\n"
+        f"  Provider : [bold cyan]{settings.provider}[/bold cyan]\n"
+        f"  Model    : [bold white]{settings.model}[/bold white]{endpoint_info}\n"
+        f"  Workspace: [dim]{settings.workspace_root}[/dim]",
+        border_style="cyan",
+        padding=(1, 1),
+        title="[bold cyan]Welcome[/bold cyan]",
+        title_align="left",
+    ))
     console.print(
-        f" [bold cyan]SetuCode[/bold cyan] [dim]│[/dim] "
-        f"[white]{settings.provider}[/white]:[dim]{settings.model}[/dim]{endpoint_info} [dim]│[/dim] "
-        f"[dim]{settings.workspace_root}[/dim]"
+        "  [dim]Commands: [bold]/model[/bold] [bold]/skills[/bold] [bold]/status[/bold] "
+        "[bold]/plan[/bold] [bold]/help[/bold] [bold]/exit[/bold][/dim]\n"
     )
-    console.print(" [dim]Type your message. Commands: /model, /skills, /status, /plan, /help, /exit[/dim]\n")
 
     try:
         while True:
             try:
-                console.print("  [prompt]❯[/prompt] ", end="")
+                console.print("[bold cyan]  ❯[/bold cyan] ", end="")
                 user_input = input().strip()
             except (EOFError, KeyboardInterrupt):
                 console.print()
@@ -213,16 +243,13 @@ def run_session(settings: Settings) -> None:
 
             console.print()
 
-            # First-class slash command handling
             if cmd_router.is_command(user_input):
                 should_continue = cmd_router.dispatch(user_input, cmd_ctx)
                 if not should_continue:
                     break
                 continue
 
-            # Run agent loop with clean status indicator
-            with console.status("    [dim]Thinking...[/dim]", spinner="dots"):
-                result = agent_run(state, user_input, bus, registry, perms)
+            result = agent_run(state, user_input, bus, registry, perms)
 
             _print_response(result)
 

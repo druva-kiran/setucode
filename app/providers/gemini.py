@@ -90,27 +90,53 @@ class GeminiProvider(BaseProvider):
                     types.Content(role="user", parts=[types.Part(text=last_user_text)])
                 )
             elif role == "assistant":
-                text = content if isinstance(content, str) else ""
-                history.append(
-                    types.Content(role="model", parts=[types.Part(text=text)])
-                )
+                parts = []
+                if content:
+                    parts.append(types.Part(text=str(content)))
+                if m.get("tool_calls"):
+                    for tc in m["tool_calls"]:
+                        tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
+                        tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                        tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                        if isinstance(tc_args, str):
+                            try:
+                                import json
+                                tc_args = json.loads(tc_args)
+                            except Exception:
+                                tc_args = {}
+                        parts.append(
+                            types.Part(
+                                function_call=types.FunctionCall(
+                                    id=tc_id or tc_name,
+                                    name=tc_name,
+                                    args=tc_args or {},
+                                )
+                            )
+                        )
+                if not parts:
+                    parts.append(types.Part(text=""))
+                history.append(types.Content(role="model", parts=parts))
             elif role == "tool":
                 # Tool result — append as user turn with function response
                 tool_id = m.get("tool_use_id") or m.get("tool_call_id") or ""
                 name = m.get("name", tool_id)
                 result_text = content if isinstance(content, str) else str(content)
-                history.append(
-                    types.Content(
-                        role="user",
-                        parts=[types.Part(
-                            function_response=types.FunctionResponse(
-                                id=tool_id,
-                                name=name,
-                                response={"result": result_text},
-                            )
-                        )],
+                fn_part = types.Part(
+                    function_response=types.FunctionResponse(
+                        id=tool_id or name,
+                        name=name,
+                        response={"result": result_text},
                     )
                 )
+                if history and history[-1].role == "user":
+                    history[-1].parts.append(fn_part)
+                else:
+                    history.append(
+                        types.Content(
+                            role="user",
+                            parts=[fn_part],
+                        )
+                    )
 
         # Build function declarations for the tool list
         genai_tools = None
