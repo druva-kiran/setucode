@@ -138,6 +138,9 @@ def run(
     iteration_count = 0
     max_iterations = 100
 
+    # Track executed tool calls in this run to break repetitive loops
+    executed_call_fingerprints: set[str] = set()
+
     while True:
         iteration_count += 1
         if iteration_count > max_iterations:
@@ -228,6 +231,17 @@ def run(
             state.status = AgentStatus.WAITING_FOR_PERMISSION
             state.pending_permission = tc
 
+            import json
+            fingerprint = f"{tc.name}:{json.dumps(tc.args, sort_keys=True)}"
+            if fingerprint in executed_call_fingerprints and tc.name in ("read_file", "list_directory", "search_files"):
+                log.warning("Loop breaker: Tool '%s' repeated with same args.", tc.name)
+                result = ToolResult(error="[SYSTEM] You just executed this exact tool call in the previous steps and received the results. Do not repeat the same action. Read the previous results in your context, think about them, and provide your final response to the user or execute a DIFFERENT task.")
+                bus.emit(PostToolUse(tc.name, result, is_error=True))
+                _append_tool_result(state.messages, tc.id, tc.name, result, provider_name)
+                continue
+
+            executed_call_fingerprints.add(fingerprint)
+
             raw_path = tc.args.get("path") or tc.args.get("source") or ""
             bus.emit(PermissionRequest(tc.name, raw_path))
 
@@ -258,6 +272,10 @@ def run(
             if result.output:
                 from app.permissions.sandbox import SecuritySandbox
                 result.output = SecuritySandbox.redact_secrets(result.output)
+
+            # If tool modified a file, clear read fingerprints so the agent can safely verify if needed
+            if tc.name in ("write_file", "edit_file", "move_file", "run_command"):
+                executed_call_fingerprints.clear()
 
             # If tool produced an error, inject into late context for targeted error recovery
             if result.is_error and result.error:
