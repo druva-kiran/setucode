@@ -94,8 +94,8 @@ def run(
             PlanManager.save_plan(state.workspace, state.plan)
             log.info("Created initial plan for complex task with %d steps", len(state.plan.tasks))
 
-    # Register plan tools if plan is active
-    if getattr(state, "plan", None) and not registry.get("get_plan"):
+    # Register plan tools (create_plan, update_plan_task, get_plan)
+    if not registry.get("get_plan"):
         for pt in build_plan_tools(
             state.workspace,
             get_plan_fn=lambda: getattr(state, "plan", None),

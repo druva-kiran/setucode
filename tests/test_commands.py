@@ -161,28 +161,141 @@ def test_exit_command(cmd_context: CommandContext):
     assert router.dispatch("/quit", cmd_context) is False
 
 
-def test_skills_toggle(cmd_context: CommandContext):
-    """/skills allows inspecting and toggling skill activation."""
+def test_menu_command_palette(cmd_context: CommandContext):
+    """/menu or bare '/' opens command palette and dispatches selected command."""
+    router = build_default_command_router()
+    # Select first command in palette and press ENTER
+    set_mock_keys(["ENTER"])
+    try:
+        cont = router.dispatch("/menu", cmd_context)
+        assert cont is True
+        output = cmd_context.console.export_text()
+        assert "Command Palette" in output or "Commands" in output or "Model" in output
+    finally:
+        clear_mock_keys()
+
+
+def test_plan_interactive_status_toggle(cmd_context: CommandContext):
+    """/plan opens interactive task manager and allows toggling task status."""
+    from app.plan.model import Plan
+    from app.plan.manager import PlanManager
+
+    plan = Plan()
+    plan.add_task("Write tests", status="pending")
+    cmd_context.state.plan = plan
+    PlanManager.save_plan(cmd_context.state.workspace, plan)
+
+    # ENTER on first task (id=1) toggles status to 'in_progress', then ESC exits
+    set_mock_keys(["ENTER", "ESC"])
+    try:
+        router = build_default_command_router()
+        cont = router.dispatch("/plan", cmd_context)
+        assert cont is True
+        assert plan.get_task(1).status == "in_progress"
+    finally:
+        clear_mock_keys()
+
+
+def test_skills_dispatch(cmd_context: CommandContext):
+    """/skills allows browsing skills and direct /<skill-name> invocation."""
     from app.skills.manager import get_default_skill_registry
 
     reg = get_default_skill_registry(cmd_context.state.workspace)
     skill = Skill(
         name="test-skill",
         description="A test capability",
-        instructions="Instructions here",
+        instructions="Special instructions for test-skill",
     )
     reg.register_skill(skill)
-    assert reg.is_active("test-skill") is False
 
-    set_mock_keys(["ENTER", "t", "ESC"])
+    set_mock_keys(["ENTER"])
     try:
         router = build_default_command_router()
-        all_skills = reg.list_all()
-        first_skill = all_skills[0].name
-        assert reg.is_active(first_skill) is False
-
         cont = router.dispatch("/skills", cmd_context)
         assert cont is True
-        assert reg.is_active(first_skill) is True
+
+        # Test direct invocation by name with arguments
+        cont2 = router.dispatch("/test-skill run my unit tests", cmd_context)
+        assert cont2 is True
+        # Check skill instructions got injected
+        assert any("Special instructions for test-skill" in m.get("content", "") or "test-skill" in m.get("content", "") for m in cmd_context.state.messages)
     finally:
         clear_mock_keys()
+
+
+def test_tools_interactive_inspector(cmd_context: CommandContext):
+    """/tools displays registered tools and schemas."""
+    from app.tools.registry import Tool
+    from app.tools.base import ToolResult
+
+    dummy_tool = Tool(
+        name="dummy_tool",
+        description="A test tool",
+        input_schema={"type": "object", "properties": {"x": {"type": "string"}}},
+        execute=lambda args: ToolResult(output="ok"),
+        permission_category="readonly",
+    )
+    cmd_context.registry.register(dummy_tool)
+
+    set_mock_keys(["ENTER"])
+    try:
+        router = build_default_command_router()
+        cont = router.dispatch("/tools", cmd_context)
+        assert cont is True
+        output = cmd_context.console.export_text()
+        assert "dummy_tool" in output
+    finally:
+        clear_mock_keys()
+
+
+def test_memory_interactive_manager(cmd_context: CommandContext, tmp_path: Path):
+    """/memory displays preferences and project context."""
+    user_md = tmp_path / "USER.md"
+    user_md.write_text("- Prefer Python 3.12+\n", encoding="utf-8")
+    cmd_context.settings.user_memory_path = user_md
+
+    set_mock_keys(["ENTER"])  # Select "View / Edit User Preferences"
+    try:
+        router = build_default_command_router()
+        cont = router.dispatch("/memory", cmd_context)
+        assert cont is True
+        output = cmd_context.console.export_text()
+        assert "Prefer Python 3.12+" in output
+    finally:
+        clear_mock_keys()
+
+
+def test_export_command(cmd_context: CommandContext, tmp_path: Path):
+    """/export writes session transcript markdown to file."""
+    cmd_context.state.messages.append({"role": "user", "content": "Hello SetuCode"})
+    cmd_context.state.messages.append({"role": "assistant", "content": "Hello! How can I assist?"})
+
+    export_path = tmp_path / "test-transcript.md"
+    router = build_default_command_router()
+    cont = router.dispatch(f"/export {export_path}", cmd_context)
+    assert cont is True
+    assert export_path.exists()
+    content = export_path.read_text(encoding="utf-8")
+    assert "Hello SetuCode" in content
+    assert "Hello! How can I assist?" in content
+
+
+def test_selector_search_filtering(cmd_context: CommandContext):
+    """Interactive selector filters items in real-time when typing characters."""
+    from dashboard.selector import SelectItem, run_interactive_selector
+
+    items = [
+        SelectItem(id="gpt4", title="GPT-4o", description="OpenAI model"),
+        SelectItem(id="claude", title="Claude 3.5 Sonnet", description="Anthropic model"),
+        SelectItem(id="gemini", title="Gemini 2.5 Flash", description="Google model"),
+    ]
+
+    # Type 'c', 'l', 'a' to filter down to Claude, then press ENTER
+    set_mock_keys(["c", "l", "a", "ENTER"])
+    try:
+        chosen = run_interactive_selector(cmd_context.console, "Test Filter", items)
+        assert chosen is not None
+        assert chosen.id == "claude"
+    finally:
+        clear_mock_keys()
+

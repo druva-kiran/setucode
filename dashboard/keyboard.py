@@ -81,13 +81,21 @@ def _read_key_windows() -> str:
             return "RIGHT"
         elif ch2 == b"S":
             return "DELETE"
+        elif ch2 == b"G":
+            return "HOME"
+        elif ch2 == b"O":
+            return "END"
+        elif ch2 == b"I":
+            return "PAGE_UP"
+        elif ch2 == b"Q":
+            return "PAGE_DOWN"
         return "SPECIAL"
 
     if ch in (b"\r", b"\n"):
         return "ENTER"
     if ch == b"\x1b":
         return "ESC"
-    if ch == b"\x08":
+    if ch in (b"\x08", b"\x7f"):
         return "BACKSPACE"
     if ch == b"\x03":
         return "CTRL_C"
@@ -129,6 +137,25 @@ def _read_key_posix() -> str:
                         return "RIGHT"
                     elif ch3 == "D":
                         return "LEFT"
+                    elif ch3 == "H":
+                        return "HOME"
+                    elif ch3 == "F":
+                        return "END"
+                    elif ch3 in ("1", "2", "3", "4", "5", "6", "7", "8"):
+                        r2, _, _ = select.select([sys.stdin], [], [], 0.05)
+                        if r2:
+                            ch4 = sys.stdin.read(1)
+                            if ch4 == "~":
+                                if ch3 == "3":
+                                    return "DELETE"
+                                elif ch3 == "5":
+                                    return "PAGE_UP"
+                                elif ch3 == "6":
+                                    return "PAGE_DOWN"
+                                elif ch3 in ("1", "7"):
+                                    return "HOME"
+                                elif ch3 in ("4", "8"):
+                                    return "END"
             return "ESC"
 
         if ch in ("\r", "\n"):

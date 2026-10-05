@@ -9,7 +9,9 @@ from app.providers.base import BaseProvider, ModelInfo, ModelResponse, ToolCall
 
 class GeminiProvider(BaseProvider):
     def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
-        kwargs: dict = dict(api_key=api_key or "no-key-required")
+        kwargs: dict = {}
+        if api_key and api_key != "no-key-required":
+            kwargs["api_key"] = api_key
         if base_url:
             kwargs["http_options"] = types.HttpOptions(base_url=base_url)
         self._client = genai.Client(**kwargs)

@@ -47,7 +47,6 @@ def get_standard_skill_paths(workspace: Path | None = None) -> list[Path]:
 
     # 3. User home directory
     home = Path.home()
-    paths.append(home / ".agents" / "skills")
     paths.append(home / ".setucode" / "skills")
 
     # 4. Custom env directories
@@ -115,18 +114,32 @@ def inject_skill_hints(
     tool_registry: ToolRegistry | None = None,
     workspace: Path | None = None,
 ) -> list[str]:
-    """Detect and inject only required skills without bloating the prompt."""
+    """Detect and inject required skills (both actively toggled and keyword-relevant) into context."""
     reg = registry or get_default_skill_registry(workspace)
-    relevant = find_relevant_skills(user_message, reg, workspace=workspace)
     injected_names: list[str] = []
 
+    # 1. Inject manually active skills
+    for active_skill_name in list(reg._active_skills):
+        skill = reg.get(active_skill_name)
+        if skill:
+            hint = skill.to_system_hint()
+            if not any(m.get("content") == hint for m in messages):
+                messages.append({"role": "system", "content": hint})
+                injected_names.append(skill.name)
+                if tool_registry and skill.tools:
+                    for tool in skill.tools:
+                        tool_registry.register(tool)
+
+    # 2. Inject dynamically relevant skills based on user message
+    relevant = find_relevant_skills(user_message, reg, workspace=workspace)
     for skill in relevant:
         reg.activate_skill(skill.name, tool_registry)
         hint = skill.to_system_hint()
         # Avoid duplicate skill hints in messages
         if not any(m.get("content") == hint for m in messages):
             messages.append({"role": "system", "content": hint})
-            injected_names.append(skill.name)
+            if skill.name not in injected_names:
+                injected_names.append(skill.name)
             log.info("Injected skill '%s' into context", skill.name)
 
     return injected_names

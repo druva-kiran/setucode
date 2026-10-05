@@ -175,3 +175,22 @@ def test_build_skill_registry_discovers_agents_skills(tmp_path: Path):
     skill_names = [s.name for s in registry.list_all()]
     assert "deploy-helper" in skill_names
 
+
+def test_manually_activated_skill_is_injected_into_messages():
+    """Manually toggled active skills are injected into system prompt even without keyword trigger."""
+    registry = SkillRegistry()
+    skill = Skill(
+        name="custom-expert",
+        description="Expert instructions",
+        instructions="Always follow custom architecture.",
+        activation_conditions=["custom_keyword_not_in_user_prompt"],
+    )
+    registry.register_skill(skill)
+    registry.activate_skill("custom-expert")
+
+    messages = [{"role": "user", "content": "hello what is 2+2"}]
+    injected = inject_skill_hints(messages, "hello what is 2+2", registry=registry)
+    assert "custom-expert" in injected
+    assert any("Always follow custom architecture" in m.get("content", "") for m in messages)
+
+
