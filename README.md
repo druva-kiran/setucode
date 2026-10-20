@@ -16,14 +16,14 @@ A fast, lightweight AI coding agent that runs right in your terminal. Built to h
 
 ## What is SetuCode?
 
-SetuCode is an autonomous software engineering agent inspired by tools like Hermes and Claude Code. It reads your files, uses tools to execute commands, catches its own test/compiler errors, and self-corrects until your task is done.
+SetuCode is an autonomous software engineering agent inspired by tools like Hermes. It reads your files, uses tools to execute commands, catches its own test/compiler errors, and self-corrects until your task is done.
 
 ## Key Features
 
 - **Self-Healing Loop**: When tests or builds fail, exit codes and stack traces feed back into the agent so it can fix the code immediately.
 - **Smart Patching**: If a unified diff patch fails due to whitespace or line mismatch, it gets the exact file snippet back so it never gets stuck.
 - **Rigorous Safeguards**: Programmatically blocked from finishing modifying tasks with chat text alone — it has to actually write or edit code files.
-- **Provider Agnostic**: Works out-of-the-box with Anthropic Claude, OpenAI, and Google Gemini.
+- **Provider Agnostic**: Works out-of-the-box with Anthropic, OpenAI, and Google Gemini.
 - **Zero Bloat**: Clean, understandable Python codebase with no unnecessary frameworks.
 
 ## Setup & Installation
