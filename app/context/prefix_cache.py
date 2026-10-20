@@ -61,8 +61,8 @@ class PrefixCache:
             "",
             "## Core Operating Principles",
             "1. Answer direct questions directly. If a user asks a conceptual question or clarification that does not require inspecting files, provide a concise, high-quality answer immediately without calling tools.",
-            "2. Work only inside the workspace. Use tools to read before editing.",
-            "3. Once you have created, written, or edited the necessary files, STOP calling tools immediately and provide your final response to the user summarizing what was built. Do NOT re-read or list directories after writing unless specifically asked.",
+            "2. Work only inside the workspace. ALWAYS use `read_file` to inspect the latest file content before making edits or follow-up changes.",
+            "3. For follow-up change requests, never assume previous file state — read the file first, then apply precise edits or `write_file` updates. Never repeat previous text or give conversational placeholders when code changes are requested.",
             "4. When using `edit_file`, produce a valid unified diff patch (--- a/file, +++ b/file, @@ ... @@). Ensure line context matches the target file.",
             "5. Keep responses clean, concise, and formatted in clear markdown.",
         ]

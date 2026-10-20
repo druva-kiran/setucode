@@ -118,6 +118,9 @@ def run(
     # Append user message
     state.messages.append({"role": "user", "content": user_message})
 
+    modifying_keywords = ("change", "update", "modify", "add", "fix", "refactor", "rewrite", "delete", "remove", "implement", "patch")
+    is_modifying_request = any(kw in user_message.lower() for kw in modifying_keywords)
+
     # --- Feature 2: Detect & Inject relevant skills ---
     from app.skills.manager import inject_skill_hints
     inject_skill_hints(state.messages, user_message, tool_registry=registry, workspace=state.workspace)
@@ -140,6 +143,7 @@ def run(
 
     # Track executed tool calls in this run to break repetitive loops
     executed_call_fingerprints: set[str] = set()
+    modified_code_files: set[str] = set()
 
     while True:
         iteration_count += 1
@@ -186,6 +190,24 @@ def run(
 
         # --- Final answer ---
         if response.final_text is not None and not response.has_tool_calls:
+            if is_modifying_request and not modified_code_files:
+                log.warning("Agent attempted to finish a code change/bug request without modifying any code files. Forcing continued execution.")
+                state.messages.append({"role": "assistant", "content": response.final_text})
+                state.messages.append({
+                    "role": "user",
+                    "content": "[SYSTEM] You attempted to finish your response without modifying any code files or applying a fix. The user's request requires fixing code/styles (e.g. theme or bug fix). You must use `read_file` to inspect the relevant files and `edit_file` or `write_file` to implement the required fix before finishing."
+                })
+                continue
+
+            if is_modifying_request and iteration_count == 1 and not executed_call_fingerprints:
+                log.warning("Agent attempted text-only final answer on a modifying request without using tools. Forcing tool usage.")
+                state.messages.append({"role": "assistant", "content": response.final_text})
+                state.messages.append({
+                    "role": "user",
+                    "content": "[SYSTEM] You responded with text only without executing any tools. The user requested a code modification. You must use `read_file` to inspect the file and `edit_file` or `write_file` to apply the requested changes. Do not just describe them in text."
+                })
+                continue
+
             state.messages.append({"role": "assistant", "content": response.final_text})
             state.status = AgentStatus.FINISHED
             bus.emit(Stop(reason="done"))
@@ -276,6 +298,11 @@ def run(
             # If tool modified a file, clear read fingerprints so the agent can safely verify if needed
             if tc.name in ("write_file", "edit_file", "move_file", "run_command"):
                 executed_call_fingerprints.clear()
+
+            if not result.is_error and tc.name in ("write_file", "edit_file"):
+                p = tc.args.get("path", "")
+                if p:
+                    modified_code_files.add(p)
 
             # If tool produced an error, inject into late context for targeted error recovery
             if result.is_error and result.error:

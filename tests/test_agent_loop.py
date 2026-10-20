@@ -97,7 +97,6 @@ class TestFinalResponse:
 class TestToolCallFlow:
     def test_tool_call_dispatched_through_permissions(self, workspace, registry):
         """AC-2: tool calls must pass through permission layer, never skipped."""
-        # First response: tool call. Second: final text.
         tc = ToolCall(id="tc1", name="list_directory", args={"path": "."})
         provider = MockProvider([
             ModelResponse(tool_calls=[tc]),
@@ -194,3 +193,18 @@ class TestErrorRecovery:
         # Check the denial was in the messages sent to LLM
         tool_result_msgs = [m for m in state.messages if m.get("role") == "tool"]
         assert any("Permission denied" in m.get("content", "") for m in tool_result_msgs)
+
+    def test_modifying_request_forces_tool_usage(self, workspace, registry):
+        """Modifying requests without modifying code files trigger system correction until code is modified."""
+        tc = ToolCall(id="tc1", name="write_file", args={"path": "hello.txt", "content": "print(2)"})
+        provider = MockProvider([
+            ModelResponse(final_text="I will update the code."),
+            ModelResponse(tool_calls=[tc]),
+            ModelResponse(final_text="Updated successfully."),
+        ])
+        bus = EventBus()
+        state = make_state(workspace, provider, registry)
+        perms = make_auto_permissions(workspace)
+
+        result = run(state, "change hello.txt", bus, registry, perms)
+        assert result == "Updated successfully."

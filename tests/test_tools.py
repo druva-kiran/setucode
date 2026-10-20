@@ -84,6 +84,13 @@ class TestWriteFile:
         assert result.is_error
         assert "outside workspace" in result.error
 
+    def test_write_file_syntax_error(self, workspace, registry):
+        tool = registry.get("write_file")
+        result = tool.execute({"path": "bad.py", "content": "def foo(unclosed"})
+        assert result.is_error
+        assert "SyntaxError" in result.error
+        assert not (workspace / "bad.py").exists()
+
 
 # ---------------------------------------------------------------------------
 # edit_file
@@ -199,15 +206,16 @@ class TestWorkspaceBoundary:
     def test_symlink_escape_blocked(self, workspace, registry):
         """A symlink pointing outside the workspace must be rejected."""
         import tempfile, os
-        # Create a truly separate temp directory (not inside workspace)
         with tempfile.TemporaryDirectory() as outside_dir:
             target = Path(outside_dir) / "secret.txt"
             target.write_text("secret")
             link = workspace / "link.txt"
-            link.symlink_to(target)
+            try:
+                link.symlink_to(target)
+            except OSError:
+                pytest.skip("Symlinks require administrator privileges on Windows")
             tool = registry.get("read_file")
             result = tool.execute({"path": "link.txt"})
-            # Symlink resolves outside workspace_root → should be blocked
             assert result.is_error
             assert "outside workspace" in result.error
 
@@ -229,3 +237,8 @@ class TestRunCommand:
         result = tool.execute({"command": ""})
         assert result.is_error
 
+    def test_run_failing_command(self, workspace, registry):
+        tool = registry.get("run_command")
+        result = tool.execute({"command": "python -c 'import sys; sys.exit(1)'"})
+        assert result.is_error
+        assert "Exit code: 1" in result.output

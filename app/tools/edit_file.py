@@ -61,7 +61,14 @@ def make_edit_file(workspace_root: Path):
             return ToolResult(error=f"Patch did not apply: {e}")
 
         if result_lines is None:
-            return ToolResult(error="Patch did not apply cleanly (context mismatch). Re-read the file and try again.")
+            numbered = [f"{i+1}: {line}" for i, line in enumerate(original_lines)]
+            snippet = "\n".join(numbered[:120])
+            return ToolResult(error=(
+                "Patch did not apply cleanly (context mismatch).\n"
+                f"Here is the current content of {resolved.relative_to(workspace_root)} (lines 1-{min(120, len(original_lines))}):\n"
+                f"{snippet}\n\n"
+                "Please re-examine the exact line numbers and content above, then retry with a corrected patch or use write_file."
+            ))
 
         try:
             # apply_diff returns lines without newlines; rejoin them

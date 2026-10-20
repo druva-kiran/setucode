@@ -16,6 +16,13 @@ def make_write_file(workspace_root: Path):
         if err:
             return ToolResult(error=err)
 
+        if resolved.suffix == ".py":
+            import ast
+            try:
+                ast.parse(content, filename=str(resolved))
+            except SyntaxError as e:
+                return ToolResult(error=f"SyntaxError in python file: {e}\nFile not written. Please fix the syntax error.")
+
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(content, encoding="utf-8")

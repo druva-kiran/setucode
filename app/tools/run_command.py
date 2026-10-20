@@ -39,7 +39,7 @@ def make_run_command(workspace_root: Path):
 
             combined = "\n".join(output_parts)
             if result.returncode != 0:
-                return ToolResult(output=combined)
+                return ToolResult(output=combined, error=combined)
             return ToolResult(output=combined)
 
         except subprocess.TimeoutExpired:
